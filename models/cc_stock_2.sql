@@ -1,33 +1,71 @@
-SELECT
-  ### Key ###
-  CONCAT(model,"_",color,"_",IFNULL(size,"no-size")) AS product_id 
-  ###########
-  ,model
-  ,color
-  ,size
-  -- category
-  ,CASE
-    WHEN REGEXP_CONTAINS(LOWER(model_name),'t-shirt') THEN 'T-shirt'
-    WHEN REGEXP_CONTAINS(LOWER(model_name),'short') THEN 'Short'
-    WHEN REGEXP_CONTAINS(LOWER(model_name),'legging') THEN 'Legging'
-    WHEN REGEXP_CONTAINS(LOWER(REPLACE(model_name,"è","e")),'brassiere|crop-top') THEN 'Crop-top'
-    WHEN REGEXP_CONTAINS(LOWER(model_name),'débardeur|haut') THEN 'Top'
-    WHEN REGEXP_CONTAINS(LOWER(model_name),'tour de cou|tapis|gourde') THEN 'Accessories'
-    ELSE NULL
-  END AS model_type
-  -- name
-  ,model_name
-  ,color_name
-  ,CONCAT(model_name," ",color_name,IF(size IS NULL,"",CONCAT(" - Taille ",size))) AS product_name
-  -- product info --
-  ,t.new AS pdt_new
-  -- stock metrics --
-  ,forecast_stock
-  ,stock
-	,IF(stock>0,1,0) AS in_stock
-	-- value
-  ,price
-	,IF(stock<0,NULL,ROUND(stock*price,2)) AS stock_value
-FROM `database_test2.raw_cc_stock` t
-WHERE TRUE
-ORDER BY product_id
+with cc_sales_products as (select * from {{ ref("cc_sales_products") }}),
+    stg_cc_stock as (
+        select
+            # ## Key ###
+            concat(model, "_", color, "_", ifnull(size, "no-size")) as product_id,
+            # ##########
+            model,
+            color,
+            size,
+            -- name
+            model_name,
+            color_name,
+            concat(
+                model_name,
+                " ",
+                color_name,
+                if(size is null, "", concat(" - Taille ", size))
+            ) as product_name,
+            -- product info --
+            t.new as pdt_new,
+            -- stock metrics --
+            forecast_stock,
+            stock,
+            -- value
+            price
+        from `dbt_intro_1.raw_cc_stock` t
+    )
+
+select
+    # ## Key ###
+    product_id,
+    # ##########
+    model,
+    color,
+    size,
+    -- category
+    case
+        when regexp_contains(lower(model_name), 't-shirt')
+        then 'T-shirt'
+        when regexp_contains(lower(model_name), 'short')
+        then 'Short'
+        when regexp_contains(lower(model_name), 'legging')
+        then 'Legging'
+        when regexp_contains(lower(replace(model_name, "è", "e")), 'brassiere|crop-top')
+        then 'Crop-top'
+        when regexp_contains(lower(model_name), 'débardeur|haut')
+        then 'Top'
+        when regexp_contains(lower(model_name), 'tour de cou|tapis|gourde')
+        then 'Accessories'
+        else null
+    end as model_type,
+    -- name
+    model_name,
+    color_name,
+    product_name,
+    -- product info --
+    pdt_new,
+    -- stock metrics --
+    forecast_stock,
+    stock,
+    if(stock > 0, 1, 0) as in_stock,
+    -- value
+    price,
+    if(stock < 0, null, round(stock * price, 2)) as stock_value,
+    -- nb days --
+    d.avg_daily_qty_91,
+    safe_divide(t.stock, d.avg_daily_qty_91) as nb_day_stock
+from stg_cc_stock t
+left join `cc_sales_products` d using (product_id)
+where true
+order by product_id
